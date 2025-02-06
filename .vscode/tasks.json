@@ -6,8 +6,13 @@
             "group": "build",
             "command": "just",
             "args": [
-                "build-debug"
+                "debug"
             ],
+            "options": {
+                "env": {
+                    "LIBCLANG_PATH":"/usr/lib/llvm-18/lib"
+                }
+            },
             "presentation": {
                 "panel": "shared",
                 "reveal": "always",
