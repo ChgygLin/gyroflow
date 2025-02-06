@@ -22,7 +22,7 @@ install-deps:
         sudo apt-get install -y libpulse-dev libasound-dev libxkbcommon-dev
         sudo apt-get install -y libfontconfig1 libfreetype6
         sudo apt-get install -y libstdc++-12-dev || true
-        sudo apt-get install -y libstdc++-8-dev || true
+        #sudo apt-get install -y libstdc++-8-dev || true
     fi
 
     mkdir -p {{ExtDir}}
@@ -51,7 +51,7 @@ install-deps:
 
     if [[ ! -d "${LIBCLANG_PATH}" ]]; then
         if [ "{{AptGetExists}}" == "true" ]; then
-            sudo apt-get install -y libclang-13-dev
+            sudo apt-get install -y libclang-18-dev
         fi
     fi
 
@@ -117,7 +117,7 @@ test *param:
 
 [no-cd]
 debug *param:
-    cargo run -- {{param}}
+    cargo build -- {{param}}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Deployment ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
