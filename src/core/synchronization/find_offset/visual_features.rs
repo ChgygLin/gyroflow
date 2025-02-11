@@ -141,6 +141,13 @@ pub fn find_offsets<F: Fn(f64) + Sync>(estimator: &PoseEstimator, ranges: &[(i64
                 }
             }
         }
+
+        if i == ranges.len() - 1 {
+            log::info!("视觉特征匹配完成 - 处理了 {} 个时间范围, 找到 {} 个匹配点", 
+                ranges.len(),
+                matched_points.len()
+            );
+        }
     }
 
     final_offsets

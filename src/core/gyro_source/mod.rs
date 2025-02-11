@@ -633,6 +633,7 @@ impl GyroSource {
 
     pub fn adjust_offsets(&mut self) {
         if self.prevent_recompute { return; }
+        log::info!("gyro_source::adjust_offsets, offsets: {:?}", self.offsets);
         // Calculate line fit
         if self.offsets.len() > 1 {
             let len = self.offsets.len();
@@ -706,7 +707,10 @@ impl GyroSource {
             self.offsets_linear = self.offsets.clone();
         }
 
+        log::info!("gyro_source::offsets_adjusted, offsets_linear: {:?}", self.offsets_linear);
+
         self.offsets_adjusted = self.offsets.iter().map(|(k, v)| (*k + (*v * 1000.0).round() as i64, *v)).collect::<BTreeMap<i64, f64>>();
+        log::info!("gyro_source::offsets_adjusted, offsets_adjusted:{:?}", self.offsets_adjusted);
     }
 
     pub fn apply_transforms(&mut self) {

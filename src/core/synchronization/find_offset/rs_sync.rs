@@ -28,8 +28,10 @@ pub fn find_offsets<F: Fn(f64) + Sync>(estimator: &PoseEstimator, ranges: &[(i64
             v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let len = v.len();
             if (len % 2) == 0 {
+                // The v has an even length, take the average of the two middle values
                 (v[len / 2 - 1] + v[len / 2]) / 2.0
             } else {
+                // The v has an odd length, take the middle value
                 v[len / 2]
             }
         }
@@ -45,6 +47,7 @@ pub fn find_offsets<F: Fn(f64) + Sync>(estimator: &PoseEstimator, ranges: &[(i64
     }
 
     let offsets = FindOffsetsRssync::new(ranges, estimator.sync_results.clone(), &sync_params, params, progress_cb, cancel_flag).full_sync();
+    log::info!("rs-sync::find_offsets completed, offsets: {:?}", offsets);
     offsets
 }
 
@@ -71,6 +74,7 @@ impl FindOffsetsRssync<'_> {
     ) -> FindOffsetsRssync<'a> {
         let matched_points = Self::collect_points(sync_results, ranges);
 
+        // used to handle the rolling shutter effect. It represents the time required for the camera sensor to scan the entire frame from start to finish.
         let mut frame_readout_time = params.frame_readout_time;
         if frame_readout_time == 0.0 {
             frame_readout_time = 1000.0 / params.scaled_fps / 2.0;
@@ -112,11 +116,13 @@ impl FindOffsetsRssync<'_> {
 
             let mut from_ts = -1;
             let mut to_ts = 0;
+            // [(current frame timestamp, of points), (next frame timestamp, of points), (width, height)]
             for (((a_t, a_p), (b_t, b_p)), frame_size) in range {
                 if from_ts == -1 {
                     from_ts = a_t;
                 }
                 to_ts = b_t;
+                // perform lens distortion correction for of feature points
                 let a = undistort_points_for_optical_flow(&a_p, from_ts, &params, frame_size);
                 let b = undistort_points_for_optical_flow(&b_p, to_ts,   &params, frame_size);
 
@@ -127,6 +133,7 @@ impl FindOffsetsRssync<'_> {
 
                 assert!(a.len() == b.len());
 
+                // perform rolling shutter time compensation for of feature points
                 let height = frame_size.1 as f64;
                 for (i, (ap, bp)) in a.iter().zip(b.iter()).enumerate() {
                     let ts_a = a_t as f64 / 1000_000.0 + frame_readout_time * (a_p[i].1 as f64 / height);
@@ -184,6 +191,11 @@ impl FindOffsetsRssync<'_> {
             }
             self.current_sync_point.fetch_add(1, SeqCst);
         }
+        log::info!("rs-sync::full_sync 同步完成 - 处理了 {} 个匹配点, 时间范围: {}s - {}s", 
+            self.sync_points.len(),
+            self.sync_points[0].0 as f64 / 1000.0 / 1000.0,
+            self.sync_points[self.sync_points.len() - 1].1 as f64 / 1000.0 / 1000.0
+        );
         offsets
     }
 
@@ -230,7 +242,8 @@ impl FindOffsetsRssync<'_> {
                 for (_ts, x) in l.range(from_ts..to_ts) {
                     if let Ok(of) = x.optical_flow.try_borrow() {
                         if let Some(Some(opt_pts)) = of.get(&1) {
-                            points_per_range.push((opt_pts.clone(), x.frame_size));
+                            // (current frame timestamp, of points), (next frame timestamp, of points), (width, height)
+                            points_per_range.push((opt_pts.clone(), x.frame_size)); // frame_size: (960, 720)
                         }
                     }
                 }
@@ -251,6 +264,7 @@ fn set_quats(sync: &mut SyncProblem, source_quats: &TimeQuat) {
         let q = Quat64::from(*q).quaternion() * rotation;
         let qv = q.as_vector();
 
+        // The expected quaternion format for the rs_sync library is (w, x, y, z)
         quats.push((qv[3], -qv[0], -qv[1], -qv[2])); // w, x, y, z
         timestamps.push(*ts);
     }

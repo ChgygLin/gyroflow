@@ -390,11 +390,12 @@ impl Controller {
         }
         let mut sync_params = sync_params.unwrap();
 
-        sync_params.initial_offset     *= 1000.0; // s to ms
-        sync_params.time_per_syncpoint *= 1000.0; // s to ms
-        sync_params.search_size        *= 1000.0; // s to ms
-        sync_params.every_nth_frame     = sync_params.every_nth_frame.max(1);
+        sync_params.initial_offset     *= 1000.0; // s to ms                    // 0
+        sync_params.time_per_syncpoint *= 1000.0; // s to ms                    // 500ms
+        sync_params.search_size        *= 1000.0; // s to ms                    // 500ms
+        sync_params.every_nth_frame     = sync_params.every_nth_frame.max(1);   // 1
 
+        // false, default mode is "synchronizeurce"
         let for_rs = mode == "estimate_rolling_shutter";
 
         let every_nth_frame = sync_params.every_nth_frame;
@@ -402,6 +403,7 @@ impl Controller {
         self.sync_in_progress = true;
         self.sync_in_progress_changed();
 
+        // "0.1;0.30000000000000004;0.5;0.7000000000000001;0.9.97fps"   ->  [0.1, 0.30000000000000004, 0.5, 0.7000000000000001, 0.9]
         let timestamps_fract: Vec<f64> = timestamps_fract.split(';').filter_map(|x| x.parse::<f64>().ok()).collect();
 
         let progress = util::qt_queued_callback_mut(self, |this, (percent, ready, total): (f64, usize, usize)| {
@@ -418,6 +420,8 @@ impl Controller {
             } else {
                 let mut gyro = this.stabilizer.gyro.write();
                 gyro.prevent_recompute = true;
+
+                //let my_offsets = [(3403.4, 49.07149195073893, 2469.454571794784), (10210.2, 49.02560488334704, 1687.1520000469884), (17000.3165, 49.38418205303837, 1856.5180621988166), (23790.4335, 50.2977951166321, 1681.702319836711), (30597.2335, 50.46544919417218, 3068.1429766153424)];
                 for x in offsets {
                     ::log::info!("Setting offset at {:.4}: {:.4} (cost {:.4})", x.0, x.1, x.2);
                     let new_ts = ((x.0 - x.1) * 1000.0) as i64;
@@ -465,7 +469,7 @@ impl Controller {
             sync.on_progress(move |percent, ready, total| {
                 progress((percent, ready, total));
             });
-            sync.on_finished(move |arg| {
+            sync.on_finished(move |arg: Either<Vec<(f64, f64, f64)>, Option<(String, f64)>>| {
                 match arg {
                     Either::Left(offsets) => set_offsets(offsets),
                     Either::Right(Some(orientation)) => set_orientation(orientation.0),
@@ -473,11 +477,12 @@ impl Controller {
                 };
             });
 
-            let ranges = sync.get_ranges();
+            // [(3150.1, 3650.1), (9950.3, 10450.3), (16750.5, 17250.5), (23550.7, 24050.7), (30350.9, 30850.9)]
+            let ranges = sync.get_ranges(); 
             let cancel_flag = self.cancel_flag.clone();
 
             let input_file = self.stabilizer.input_file.read().clone();
-            let proc_height = self.processing_resolution;
+            let proc_height = self.processing_resolution;   // 720
             let gpu_decoding = self.stabilizer.gpu_decoding.load(SeqCst);
             core::run_threaded(move || {
                 let mut frame_no = 0;
@@ -507,10 +512,11 @@ impl Controller {
                             assert!(_output_frame.is_none());
 
                             if abs_frame_no % every_nth_frame == 0 {
-                                let h = if proc_height > 0 { proc_height as u32 } else { input_frame.height() };
-                                let ratio = input_frame.height() as f64 / h as f64;
-                                let sw = (input_frame.width() as f64 / ratio).round() as u32;
-                                let sh = (input_frame.height() as f64 / (input_frame.width() as f64 / sw as f64)).round() as u32;
+                                let h = if proc_height > 0 { proc_height as u32 } else { input_frame.height() };    // 720
+                                // input_width = 2704, input_height = 2028
+                                let ratio = input_frame.height() as f64 / h as f64; // 2028 / 720 = 2.8166666666666665
+                                let sw = (input_frame.width() as f64 / ratio).round() as u32;   // 2704 / 2.8166666666666665 = 960  
+                                let sh = (input_frame.height() as f64 / (input_frame.width() as f64 / sw as f64)).round() as u32;   // 2028 / (2704 / 960) = 720
                                 match converter.scale(input_frame, ffmpeg_next::format::Pixel::GRAY8, sw, sh) {
                                     Ok(small_frame) => {
                                         let (width, height, stride, pixels) = (small_frame.plane_width(0), small_frame.plane_height(0), small_frame.stride(0), small_frame.data(0));

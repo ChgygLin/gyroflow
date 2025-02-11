@@ -146,13 +146,18 @@ impl AutosyncProcess {
             timestamp_us = (timestamp_us as f64 / scale) as i64;
         }
 
+        let mut tmp_frame;
         {
             let compute_params = compute_params.read();
             let frame = crate::frame_at_timestamp(timestamp_us as f64 / 1000.0, compute_params.scaled_fps) as usize;
             timestamp_us += (compute_params.gyro.read().file_metadata.read().per_frame_time_offsets.get(frame).unwrap_or(&0.0) * 1000.0).round() as i64;
-        }
 
+            tmp_frame = frame;
+            // println!("feed_frame - frame index in video: {}, feed frame number: {}, timestamp_us: {}", frame, frame_no, timestamp_us);
+        }
+        // 第一帧： [(3150100, 3650100), (9950300, 10450300), (16750500, 17250500), (23550700, 24050700), (30350900, 30850900)]
         if let Some(_current_range) = self.scaled_ranges_us.iter().find(|(from, to)| (*from..=*to).contains(&timestamp_us)) {
+            println!("feed_frame - frame index in video: {}, feed frame number: {}, timestamp_us: {}", tmp_frame, frame_no, timestamp_us);
             self.total_read_frames.fetch_add(1, SeqCst);
 
             self.thread_pool.spawn(move || {
@@ -172,6 +177,8 @@ impl AutosyncProcess {
                     if let Some(cb) = &progress_cb {
                         let d = total_detected_frames.load(SeqCst);
                         let t = total_read_frames.load(SeqCst).max(frame_count);
+
+                        // When the feed frame process is completed, the progress bar halts at 58%, with the remaining 42% is dedicated to find the offset in finished_feeding_frames.
                         cb((d as f64 / t.max(1) as f64) * 0.58, d, t);
                     }
                 } else {
@@ -186,9 +193,11 @@ impl AutosyncProcess {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
+         // default rs-sync
         let offset_method = self.sync_params.offset_method;
 
-        let progress_cb = self.progress_cb.clone();
+        // progress bar callback
+        let progress_cb = self.progress_cb.clone(); 
 
         self.estimator.process_detected_frames(self.org_fps, self.scaled_fps, &self.compute_params.read());
         self.estimator.recalculate_gyro_data(self.org_fps, true);
@@ -197,6 +206,7 @@ impl AutosyncProcess {
 
         let mut scaled_ranges_us = Cow::Borrowed(&self.scaled_ranges_us);
 
+        // A new range of data(scaled_ranges_us) needs to be created when there is no gyroscope data and the mode is synchronize
         if self.mode == "synchronize" && !self.compute_params.read().gyro.read().has_motion() {
             // If no gyro data in file, set the computed optical flow as gyro data
             let compute_params = self.compute_params.write();
@@ -220,7 +230,9 @@ impl AutosyncProcess {
             cb(0.6, d, t);
         }
 
-        let check_negative = self.sync_params.initial_offset_inv && self.sync_params.initial_offset.abs() > 1.0;
+        // when the check_negative is true, the offset will run twice, once with the positive offset and once with the negative offset, and then the smaller one will be selected,
+        // thus the progress bar will be halved.
+        let check_negative = self.sync_params.initial_offset_inv && self.sync_params.initial_offset.abs() > 1.0;    // false
 
         let for_negative = AtomicBool::new(false);
 
@@ -274,6 +286,13 @@ impl AutosyncProcess {
             let len = self.total_detected_frames.load(SeqCst);
             cb(1.0, len, len);
         }
+
+        log::info!("autosync::finished_feeding_frames, 同步处理完成 - FPS: {}, 缩放FPS: {}, 处理的帧数: {}, 同步点数: {}", 
+            self.org_fps,
+            self.scaled_fps,
+            self.total_read_frames.load(SeqCst),
+            self.estimator.sync_results.read().len()
+        );
     }
 
     pub fn on_progress<F>(&mut self, cb: F) where F: Fn(f64, usize, usize) + Send + Sync + 'static {
