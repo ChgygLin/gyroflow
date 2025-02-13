@@ -1041,7 +1041,7 @@ impl RenderQueue {
                 'ranges: for range in ranges_to_render {
                     if cancel_flag.load(SeqCst) { break; }
                     let mut i = 0;
-                    loop {
+                    loop {  // 循环处理导出队列 
                         let result = rendering::render(stab.clone(), progress.clone(), &input_file, &render_options, i, range, cancel_flag.clone(), pause_flag.clone(), encoder_initialized.clone());
                         if let Err(e) = result {
                             if let rendering::FFmpegError::PixelFormatNotSupported((fmt, supported, candidate)) = e {

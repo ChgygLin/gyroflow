@@ -468,10 +468,10 @@ impl GyroSource {
 
         self.clear();
 
-        self.imu_transforms.imu_orientation = telemetry.imu_orientation.clone();
+        self.imu_transforms.imu_orientation = telemetry.imu_orientation.clone();    // "ZyX"
 
-        let has_quats = !telemetry.quaternions.is_empty();
-        let has_raw_imu = !telemetry.raw_imu.is_empty();
+        let has_quats = !telemetry.quaternions.is_empty();  // false
+        let has_raw_imu = !telemetry.raw_imu.is_empty();    // true
 
         self.file_metadata = telemetry.into();
 
@@ -494,10 +494,10 @@ impl GyroSource {
         if has_raw_imu {
             {
                 let file_metadata = self.file_metadata.read();
-                let len = file_metadata.raw_imu.len() as f64;
-                let first_ts = file_metadata.raw_imu.first().map(|x| x.timestamp_ms).unwrap_or_default();
-                let last_ts  = file_metadata.raw_imu.last() .map(|x| x.timestamp_ms).unwrap_or_default();
-                let imu_duration = (last_ts - first_ts) * ((len + 1.0) / len);
+                let len = file_metadata.raw_imu.len() as f64;   // 6567
+                let first_ts = file_metadata.raw_imu.first().map(|x| x.timestamp_ms).unwrap_or_default();   // 0
+                let last_ts  = file_metadata.raw_imu.last() .map(|x| x.timestamp_ms).unwrap_or_default();   // 33009.381999999998
+                let imu_duration = (last_ts - first_ts) * ((len + 1.0) / len); // 33014.408554286587
                 if (imu_duration - self.duration_ms).abs() > 0.01 {
                     log::warn!("IMU duration {imu_duration} is different than video duration ({})", self.duration_ms);
                     if imu_duration > 0.0 {
@@ -505,6 +505,7 @@ impl GyroSource {
                     }
                 }
             }
+            // mainly handles the imu orientation, and integrate.
             self.apply_transforms();
         } else if self.quaternions.is_empty() {
             self.integrate();
@@ -533,7 +534,7 @@ impl GyroSource {
                 }
             },
             1 => self.quaternions = ComplementaryIntegrator  ::integrate(self.raw_imu(&file_metadata), self.duration_ms),
-            2 => self.quaternions = VQFIntegrator            ::integrate(self.raw_imu(&file_metadata), self.duration_ms),
+            2 => self.quaternions = VQFIntegrator            ::integrate(self.raw_imu(&file_metadata), self.duration_ms),   // default integration method
             3 => self.quaternions = SimpleGyroIntegrator     ::integrate(self.raw_imu(&file_metadata), self.duration_ms),
             4 => self.quaternions = SimpleGyroAccelIntegrator::integrate(self.raw_imu(&file_metadata), self.duration_ms),
             5 => self.quaternions = MahonyIntegrator         ::integrate(self.raw_imu(&file_metadata), self.duration_ms),

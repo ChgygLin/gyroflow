@@ -7,6 +7,7 @@ use super::ffmpeg_processor::Status;
 use super::ffmpeg_processor::FFmpegError;
 use super::ffmpeg_processor::FrameTimestamps;
 use super::ffmpeg_video_converter::Converter;
+use image::{ImageBuffer, Rgb};
 
 pub struct FrameBuffers {
     pub sw_frame: frame::Video,
@@ -87,6 +88,72 @@ macro_rules! ffmpeg {
         let err = unsafe { $func };
         if err < 0 { return Err(FFmpegError::$err(err)); }
     };
+}
+
+pub fn debug_save_frame(frame: &frame::Video, filename: &str) {
+    // 创建 RGB 转换上下文
+    let mut rgb_converter = match software::scaling::Context::get(
+        frame.format(),
+        frame.width(),
+        frame.height(),
+        format::Pixel::RGB24,
+        frame.width(),
+        frame.height(),
+        software::scaling::flag::Flags::BILINEAR,
+    ) {
+        Ok(conv) => conv,
+        Err(e) => {
+            log::error!("Failed to create RGB converter: {}", e);
+            return;
+        }
+    };
+
+    // 创建 RGB 输出帧
+    let mut rgb_frame = frame::Video::new(
+        format::Pixel::RGB24,
+        frame.width(),
+        frame.height()
+    );
+
+    // 转换为 RGB
+    if let Err(e) = rgb_converter.run(frame, &mut rgb_frame) {
+        log::error!("Failed to convert frame to RGB: {}", e);
+        return;
+    }
+
+    // 创建图像缓冲
+    let mut img = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(
+        rgb_frame.width(),
+        rgb_frame.height()
+    );
+
+    // 复制 RGB 数据
+    unsafe {
+        let data = (*rgb_frame.as_ptr()).data[0];
+        let linesize = (*rgb_frame.as_ptr()).linesize[0] as usize;
+
+        for y in 0..rgb_frame.height() {
+            let line_start = data.add(y as usize * linesize);
+            let line = std::slice::from_raw_parts(line_start, (rgb_frame.width() * 3) as usize);
+
+            for x in 0..rgb_frame.width() {
+                let i = (x * 3) as usize;
+                img.put_pixel(x, y, Rgb([
+                    line[i],     // R
+                    line[i + 1], // G 
+                    line[i + 2]  // B
+                ]));
+            }
+        }
+    }
+
+    // 保存图片
+    if let Err(e) = img.save(filename) {
+        log::error!("Failed to save debug frame {}: {}", filename, e);
+        return;
+    }
+
+    log::debug!("Successfully saved frame to {}", filename);
 }
 
 impl<'a> VideoTranscoder<'a> {
@@ -254,11 +321,23 @@ impl<'a> VideoTranscoder<'a> {
                         }
                     }
 
+                    // 打印input_frame的各种属性
+                    if !self.decode_only{
+                        log::debug!("input_frame format: {:?}", input_frame.format());  // NV12
+                        log::debug!("input_frame width: {:?}", input_frame.width());    // 2704
+                        log::debug!("input_frame height: {:?}", input_frame.height());    // 2028
+                    }
+
                     // Process frame
                     if self.decode_only || self.processing_order == ProcessingOrder::PreConversion {
                         if let Some(ref mut cb) = self.on_frame_callback {
                             cb(timestamp_us, input_frame, self.buffers.output_frame_pre.as_mut(), &mut self.converter, &mut rate_control)?;
                         }
+                    }
+
+                    if false &&!self.decode_only {
+                        debug_save_frame(input_frame, "debug_input_frame.png");
+                        debug_save_frame(self.buffers.output_frame_pre.as_ref().unwrap(), "debug_output_frame_pre.png");
                     }
 
                     let mut hw_upload_format = None;
@@ -366,6 +445,8 @@ impl<'a> VideoTranscoder<'a> {
                                 cb(timestamp_us, final_frame, self.buffers.output_frame_post.as_mut(), &mut self.converter, &mut rate_control)?;
 
                                 final_frame = self.buffers.output_frame_post.as_mut().unwrap();
+
+
                             }
                         }
 

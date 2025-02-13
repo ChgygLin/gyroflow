@@ -15,6 +15,8 @@ use zero_copy::*;
 #[cfg(target_os = "android")]
 pub mod ffmpeg_android;
 
+use ffmpeg_video::debug_save_frame;
+
 pub use self::video_processor::VideoProcessor;
 pub use self::ffmpeg_processor::{ FfmpegProcessor, FFmpegError };
 use render_queue::RenderOptions;
@@ -460,9 +462,10 @@ pub fn render<F, F2>(stab: Arc<StabilizationManager>, progress: F, input_file: &
         macro_rules! create_planes_proc {
             ($planes:ident, $(($t:tt, $in_frame:expr, $out_frame:expr, $ind:expr, $yuvi:expr, $max_val:expr), )*) => {
                 $({
-                    let in_size = zero_copy::get_plane_size($in_frame, $ind);
-                    let out_size = zero_copy::get_plane_size($out_frame, $ind);
+                    let in_size = zero_copy::get_plane_size($in_frame, $ind);       // (2704, 2028)
+                    let out_size = zero_copy::get_plane_size($out_frame, $ind);     // (2704, 1520)
 
+                    // (2704, 2028), (2704, 1520)
                     let org_sizes = {
                         let params = stab.params.read();
                         (params.size, params.output_size)
@@ -487,6 +490,7 @@ pub fn render<F, F2>(stab: Arc<StabilizationManager>, progress: F, input_file: &
                     plane.set_compute_params(compute_params);
                     let render_globals = render_globals.clone();
                     $planes.push(Box::new(move |timestamp_us: i64, in_frame_data: &mut Video, out_frame_data: &mut Video, plane_index: usize, fill_with_background: bool| {
+                        log::debug!("Processing plane with pixel type: {:?}", stringify!($t));
                         let mut g = render_globals.borrow_mut();
                         let wgpu_format = $t::wgpu_format().map(|x| x.0);
 
@@ -533,6 +537,9 @@ pub fn render<F, F2>(stab: Arc<StabilizationManager>, progress: F, input_file: &
             }
             match format {
                 Pixel::NV12 => {
+                    // NV12 格式的内存布局示意, 每个[]一个字节, 考虑到内存访问更高效, 分成2步处理
+                    // Y 平面: 连续的单字节数据:    [Y1][Y2][Y3][Y4]...
+                    // UV 平面: 交错的双字节数据:   [U1][V1][U2][V2]...
                     create_planes_proc!(planes,
                         (Luma8, input_frame, output_frame, 0, [0], 255.0),
                         (UV8,   input_frame, output_frame, 1, [1,2], 255.0),
@@ -651,7 +658,14 @@ pub fn render<F, F2>(stab: Arc<StabilizationManager>, progress: F, input_file: &
             }
         }
 
-        process_frame += 1;
+        // 可视化input_frame, output_frame, 需要nv12转为rgb, 保存路径为results/{process_frame}_{intput/output}_frame.png
+        if false
+        {
+            debug_save_frame(input_frame, &format!("results/intpu_{}_frame.png", process_frame));
+            debug_save_frame(output_frame, &format!("results/output_{}_frame.png", process_frame));
+        }
+
+        process_frame += 1; // 0 -> 1018
         // log::debug!("process_frame: {}, timestamp_us: {}", process_frame, timestamp_us);
 
         Ok(())
