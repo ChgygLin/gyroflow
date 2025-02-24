@@ -104,7 +104,7 @@ pub fn export_gyro_data(filename: &str, fields_json: &str, stab: &Arc<crate::Sta
     let timestamps: Vec<(Option<usize>, usize, TimestampType, f64)> = if all_samples {
         let mut frame = 0;
         gyro.quaternions.keys().enumerate().map(|(i, ts)| {
-            let mut timestamp_ms = *ts as f64 / 1000.0;
+            let mut timestamp_ms = *ts as f64 / 1000.0;            
             timestamp_ms += gyro.offset_at_gyro_timestamp(timestamp_ms);
 
             let final_timestamp = timestamp_ms - file_metadata.per_frame_time_offsets.get(frame).unwrap_or(&0.0);
@@ -162,6 +162,46 @@ pub fn export_gyro_data(filename: &str, fields_json: &str, stab: &Arc<crate::Sta
 
     let raw_imu = gyro.raw_imu(&file_metadata);
 
+    {
+        // 保存raw_imu前100个gyro, acc数据到csv文件
+        // for (i, frame, ts, timestamp_ms) in timestamps {
+        raw_imu.iter().take(10).for_each(|v| {
+            log::info!("timestamp_ms: {}, gyro: {:?}, acc: {:?}", v.timestamp_ms, v.gyro, v.accl);  // ms
+        });
+
+        gyro.quaternions.keys().enumerate().take(10).for_each(|(i, ts)| {
+            log::info!("i: {}, ts: {}, quat: {:?}", i, ts, gyro.quaternions.get(ts).unwrap());  // us
+        });
+
+        // 保存csv数据, 列名为: imu frame, time_stamp_ms, acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z, quat_w, quat_x, quat_y, quat_z
+        let mut csv_data = String::new();
+        csv_data.push_str("frame, time_stamp_ms, org_acc_x, org_acc_y, org_acc_z, org_gyro_x, org_gyro_y, org_gyro_z, org_quat_w, org_quat_x, org_quat_y, org_quat_z\n");
+
+        for (i, _, _, _) in timestamps {
+            let raw_imu = raw_imu.get(i.unwrap_or(usize::MAX)).cloned().unwrap_or_default();
+
+            let ts_ms = raw_imu.timestamp_ms;
+            let ts_us = (ts_ms*1000.0) as i64;
+
+            let quat_org = gyro.quaternions.get(&ts_us).unwrap();
+
+            let quatv = quat_org.as_vector();
+
+            // 这里的raw_imu已经更换到ZyX坐标系了，还原到原始数据   XZ换顺序，Y取反
+            let val_oaccl = [get(raw_imu.accl, 2), -get(raw_imu.accl, 1), get(raw_imu.accl, 0)];
+            let val_ogyro = [get(raw_imu.gyro, 2), -get(raw_imu.gyro, 1), get(raw_imu.gyro, 0)];
+            let val_oquat = [quatv[3], quatv[0], quatv[1], quatv[2]];
+
+            let _ = write!(csv_data, "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n", i.unwrap_or(usize::MAX), ts_ms, val_oaccl[0], val_oaccl[1], val_oaccl[2], val_ogyro[0], val_ogyro[1], val_ogyro[2], val_oquat[0], val_oquat[1], val_oquat[2], val_oquat[3]);
+
+        }   
+
+        std::fs::write("/home/chg/EIS/raw_imu.csv", csv_data).unwrap();
+
+        return "helloworld".to_string();
+    }
+
+
     for (i, frame, ts, timestamp_ms) in timestamps {
         let raw_imu = raw_imu.get(i.unwrap_or(usize::MAX)).cloned().unwrap_or_default();
         let quat_org = match ts { TimestampType::Microseconds(ts) => *gyro.quaternions.get(&ts).unwrap(), TimestampType::Milliseconds(ts) => gyro.org_quat_at_timestamp(ts) };
@@ -185,7 +225,10 @@ pub fn export_gyro_data(filename: &str, fields_json: &str, stab: &Arc<crate::Sta
             ));
         }
 
-        let quat_smooth = match ts { TimestampType::Microseconds(ts) => *gyro.smoothed_quaternions.get(&ts).unwrap(), TimestampType::Milliseconds(ts) => gyro.smoothed_quat_at_timestamp(ts) };
+        let quat_smooth = match ts { 
+            TimestampType::Microseconds(ts) => *gyro.smoothed_quaternions.get(&ts).unwrap(), 
+            TimestampType::Milliseconds(ts) => gyro.smoothed_quat_at_timestamp(ts) 
+        };
 
         // smoothed_quaternions is the quaternion needed to stabilize, but in this case we want to get the stabilized camera motion
         // we need to reverse the calculation done by gyroflow to get original smoothed quaternion

@@ -240,6 +240,7 @@ impl Stabilization {
         let frame = frame.unwrap_or_else(|| crate::frame_at_timestamp(timestamp_ms, self.compute_params.scaled_fps) as usize);
 
         let mut transform = FrameTransform::at_timestamp(&self.compute_params, timestamp_ms, frame);
+
         transform.kernel_params.pixel_value_limit = T::default_max_value().unwrap_or(f32::MAX);
         transform.kernel_params.max_pixel_value = T::default_max_value().unwrap_or(1.0);
         // If the pixel format gets converted to normalized 0-1 float in shader
@@ -261,7 +262,7 @@ impl Stabilization {
         transform.kernel_params.stride        = buffers.input.size.2 as i32;
         transform.kernel_params.output_stride = buffers.output.size.2 as i32;
 
-        if transform.kernel_params.interpolation > 8 {
+        if transform.kernel_params.interpolation > 8 {  // default is 8.
             let (b, c) = match self.interpolation {
                 Interpolation::RobidouxSharp => (0.2620145, 0.3689927),
                 Interpolation::Robidoux      => (0.3782157, 0.3108921),
@@ -288,7 +289,7 @@ impl Stabilization {
                     fov / (if self.compute_params.adaptive_zoom_window == 0.0 { transform.minimal_fov as f32 } else { 1.0 })
                 }
             } else {
-                1.0
+                1.0 // we are here.
             };
         let pos_x = (transform.kernel_params.output_width as f32 - (transform.kernel_params.output_width as f32 / sa_fov)) / 2.0;
         let pos_y = (transform.kernel_params.output_height as f32 - (transform.kernel_params.output_height as f32 / sa_fov)) / 2.0;
@@ -297,10 +298,10 @@ impl Stabilization {
         transform.kernel_params.safe_area_rect[2] = transform.kernel_params.output_width as f32 - pos_x;
         transform.kernel_params.safe_area_rect[3] = transform.kernel_params.output_height as f32 - pos_y;
 
-        if let Some(r) = buffers.input.rotation {
+        if let Some(r) = buffers.input.rotation {   // none
             transform.kernel_params.input_rotation = r;
         }
-        if let Some(r) = buffers.output.rotation {
+        if let Some(r) = buffers.output.rotation {  // none
             transform.kernel_params.output_rotation = r;
         }
 

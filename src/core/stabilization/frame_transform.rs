@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2021-2022 Adrian <adrian.eddy at gmail>
 
+use libc::MAXTTL;
 use nalgebra::Matrix3;
 use super::{ ComputeParams, KernelParams };
 use rayon::iter::{ ParallelIterator, IntoParallelIterator };
@@ -134,14 +135,20 @@ impl FrameTransform {
     }
 
     pub fn at_timestamp(params: &ComputeParams, timestamp_ms: f64, frame: usize) -> Self {
+        // keyframes is empty when timestamp_ms is 0.0 and frame is 0 at first time
         // ----------- Keyframes -----------
         let video_rotation = params.keyframes.value_at_video_timestamp(&KeyframeType::VideoRotation, timestamp_ms).unwrap_or(params.video_rotation);
         let background_margin = params.keyframes.value_at_video_timestamp(&KeyframeType::BackgroundMargin, timestamp_ms).unwrap_or(params.background_margin);
         let background_feather = params.keyframes.value_at_video_timestamp(&KeyframeType::BackgroundFeather, timestamp_ms).unwrap_or(params.background_margin_feather);
-        let lens_correction_amount = params.keyframes.value_at_video_timestamp(&KeyframeType::LensCorrectionStrength, timestamp_ms).unwrap_or(params.lens_correction_amount);
+        let lens_correction_amount = params.keyframes.value_at_video_timestamp(&KeyframeType::LensCorrectionStrength, timestamp_ms).unwrap_or(params.lens_correction_amount);   // 1.0
         let adaptive_zoom_center_x = params.keyframes.value_at_video_timestamp(&KeyframeType::ZoomingCenterX, timestamp_ms).unwrap_or(params.adaptive_zoom_center_offset.0);
         let mut adaptive_zoom_center_y = params.keyframes.value_at_video_timestamp(&KeyframeType::ZoomingCenterY, timestamp_ms).unwrap_or(params.adaptive_zoom_center_offset.1);
 
+        if video_rotation!=0.0 || background_margin!=0.0 || background_feather!=0.0 || adaptive_zoom_center_x!=0.0 || adaptive_zoom_center_y!=0.0 {
+            log::debug!("Keyframes at timestamp: {timestamp_ms:.3}, rotation: {video_rotation:.3}, margin: {background_margin:.3}, feather: {background_feather:.3}, zoom center: ({adaptive_zoom_center_x:.3}, {adaptive_zoom_center_y:.3})");
+        }
+
+        // TODO: used for handling special scenarios such as underwater phtograhpy ?
         let light_refraction_coefficient = params.keyframes.value_at_video_timestamp(&KeyframeType::LightRefractionCoeff, timestamp_ms).unwrap_or(params.light_refraction_coefficient);
 
         // let additional_translation_x = params.keyframes.value_at_video_timestamp(&KeyframeType::AdditionalTranslationX, timestamp_ms).unwrap_or(params.additional_translation.0) as f32;
@@ -185,6 +192,7 @@ impl FrameTransform {
         let row_readout_time = frame_readout_time / if params.frame_readout_direction.is_horizontal() { params.width } else { params.height } as f64;
         let timestamp_ms = timestamp_ms + file_metadata.per_frame_time_offsets.get(frame).unwrap_or(&0.0);
         let start_ts = timestamp_ms - (frame_readout_time / 2.0);
+        log::info!("per_frame_time_offsets: {:?}", file_metadata.per_frame_time_offsets);
         // ----------- Rolling shutter correction -----------
 
         // let frame_period = 1000.0 / params.scaled_fps as f64;
@@ -196,7 +204,7 @@ impl FrameTransform {
                 params.height as f64 / is.crop_area.3 as f64 / is.pixel_pitch.1 as f64 * (if params.framebuffer_inverted { -1.0 } else { 1.0 }),
             )
         } else {
-            (1.0, 1.0)
+            (1.0, 1.0)  // here
         };
         // let height_scale = params.video_height as f64 / params.height.max(1) as f64;
 
@@ -204,22 +212,26 @@ impl FrameTransform {
 
         let quat1 = gyro.org_quat_at_timestamp(timestamp_ms).inverse();
         let smoothed_quat1 = gyro.smoothed_quat_at_timestamp(timestamp_ms);
-
+        
         // Only compute 1 matrix if not using rolling shutter correction
         let rows = if frame_readout_time.abs() > 0.0 { if params.frame_readout_direction.is_horizontal() { params.width } else { params.height } } else { 1 };
 
-        let matrices = (0..rows).into_par_iter().map(|y| {
+        // computes rotation matrices for each row(input height: 2028), for rolling shutter.
+        let matrices = (0..rows).into_par_iter().map(|y: usize| {
             let quat_time = if frame_readout_time.abs() > 0.0 {
                 start_ts + row_readout_time * y as f64
             } else {
                 start_ts
             };
+
+            // quat1为逆矩阵，将平滑后的姿态(smoothed_quat1)转换回原始姿态空间,以便将其乘以quat_time时刻的姿态
             let quat = smoothed_quat1
                      * quat1
                      * gyro.org_quat_at_timestamp(quat_time);
-
-
+                     
             let mut r = image_rotation * *quat.to_rotation_matrix().matrix();
+
+            // default is false.
             if params.framebuffer_inverted {
                 r[(0, 2)] *= -1.0; r[(1, 2)] *= -1.0;
                 r[(2, 0)] *= -1.0; r[(2, 1)] *= -1.0;
@@ -228,6 +240,7 @@ impl FrameTransform {
                 r[(1, 0)] *= -1.0; r[(2, 0)] *= -1.0;
             }
 
+            // no data.
             let (mut sx, mut sy, mut ra, mut ox, mut oy) = if let Some(is) = file_metadata.camera_stab_data.get(frame) {
                 // let ts = ((row_readout_time * y as f64 + frame_period * frame as f64) * 1000.0).round() as i64;
                 let y_sensor = map_coord(y as f64, 0.0, params.height as f64, is.crop_area.1 as f64, is.crop_area.1 as f64 + is.crop_area.3 as f64);
@@ -245,10 +258,10 @@ impl FrameTransform {
                 // if y == 0 { log::debug!("IBIS data at frame: {frame}, ts: {ts}, sx: {sx:.3}, sy: {sy:.3}, ra: {ra:.3}, ox: {ox:.3}, oy: {oy:.3}"); }
                 (sx as f32, sy as f32, ra.to_radians() as f32, ox as f32, oy as f32)
             } else {
-                (0.0, 0.0, 0.0, 0.0, 0.0)
+                (0.0, 0.0, 0.0, 0.0, 0.0)   // we are here.
             };
 
-            if params.suppress_rotation {
+            if params.suppress_rotation {   // false
                 r = Matrix3::identity();
                 if params.frame_readout_time == 0.0 {
                     sx = 0.0; sy = 0.0; ra = 0.0; ox = 0.0; oy = 0.0;
@@ -264,20 +277,20 @@ impl FrameTransform {
                 i_r[(0, 0)], i_r[(0, 1)], i_r[(0, 2)],
                 i_r[(1, 0)], i_r[(1, 1)], i_r[(1, 2)],
                 i_r[(2, 0)], i_r[(2, 1)], i_r[(2, 2)],
-                sx, sy, ra,
+                sx, sy, ra, 
                 ox, oy
             ]
-        }).collect::<Vec<[f32; 14]>>();
+        }).collect::<Vec<[f32; 14]>>(); // len: frame width
         drop(file_metadata);
         drop(gyro);
 
         let mut digital_lens_params = [0f32; 4];
-        if let Some(p) = &params.digital_lens_params {
+        if let Some(p) = &params.digital_lens_params {  // None
             for (i, v) in p.iter().enumerate() {
                 digital_lens_params[i] = *v as f32;
             }
         }
-        if params.framebuffer_inverted {
+        if params.framebuffer_inverted {    // false
             adaptive_zoom_center_y *= -1.0;
         }
 

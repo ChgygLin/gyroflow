@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2021-2022 Adrian <adrian.eddy at gmail>
 
+use ffmpeg_next::format::context::input;
 use ffmpeg_next::{ ffi, codec, decoder, encoder, format, frame, picture, software, util, Dictionary, Packet, Rational, Error, rescale::Rescale };
 
 use super::ffmpeg_processor::Status;
@@ -278,6 +279,8 @@ impl<'a> VideoTranscoder<'a> {
                         ..Default::default()
                     };
 
+                    // log::debug!("{:?}", sw_frame.format());
+
                     let mut hw_formats = None;
                     let input_frame =
                         if unsafe { !(*frame.as_mut_ptr()).hw_frames_ctx.is_null() } {
@@ -290,6 +293,8 @@ impl<'a> VideoTranscoder<'a> {
                         } else {
                             &mut frame
                         };
+                    
+                    log::debug!("{:?}", input_frame.format());
 
                     if input_frame.format() == format::Pixel::YUVJ420P {
                         input_frame.set_format(format::Pixel::YUV420P);
@@ -323,6 +328,7 @@ impl<'a> VideoTranscoder<'a> {
 
                     // 打印input_frame的各种属性
                     if !self.decode_only{
+                        log::info!("timestamp_us: {:?}", timestamp_us);
                         log::debug!("input_frame format: {:?}", input_frame.format());  // NV12
                         log::debug!("input_frame width: {:?}", input_frame.width());    // 2704
                         log::debug!("input_frame height: {:?}", input_frame.height());    // 2028
@@ -352,7 +358,7 @@ impl<'a> VideoTranscoder<'a> {
                         };
 
                         if self.gpu_decoding && self.encoder_params.pixel_format.is_none() {
-                            log::debug!("Hardware transfer formats from GPU: {:?}", hw_formats);
+                            // log::debug!("Hardware transfer formats from GPU: {:?}", hw_formats);
                             if let Some(hw_formats) = &hw_formats {
                                 if !hw_formats.is_empty() {
                                     let dl_format = *hw_formats.first().ok_or(FFmpegError::NoHWTransferFormats)?;

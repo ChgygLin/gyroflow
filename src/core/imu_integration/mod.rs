@@ -114,6 +114,11 @@ impl GyroIntegrator for VQFIntegrator {
         let sample_time = duration_ms / (imu_data.len() * 1000) as f64;
 
         let num_samples = imu_data.len();
+        log::info!("############ sample_time: {}, num_samples: {}", sample_time, num_samples);
+        // 打印imu_data前100个数据
+        imu_data.iter().take(10).for_each(|v| {
+            log::info!("timestamp_ms: {}, gyro: {:?}, acc: {:?}, magn: {:?}", v.timestamp_ms, v.gyro, v.accl, v.magn);
+        });
 
         let mut gyr = Vec::with_capacity(num_samples*3);
         let mut acc = Vec::with_capacity(num_samples*3);
@@ -141,6 +146,7 @@ impl GyroIntegrator for VQFIntegrator {
         for (i, v) in imu_data.iter().enumerate() {
             out_quats.insert((v.timestamp_ms * 1000.0) as i64, Quat64::from_quaternion(Quaternion::from_parts(quat[i*4], Vector3::new(quat[i*4+1], quat[i*4+2], quat[i*4+3]))));
         }
+        log::info!("out_quats: {:?}", out_quats.iter().take(10).collect::<Vec<_>>());
         out_quats
     }
 }

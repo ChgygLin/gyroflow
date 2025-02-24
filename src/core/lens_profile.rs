@@ -597,6 +597,7 @@ impl LensProfile {
                 }
             }
             self.parsed_interpolations = interpolations;
+            log::info!("interpolations: {:?}", self.parsed_interpolations.keys().collect::<Vec<_>>());
         }
     }
 }

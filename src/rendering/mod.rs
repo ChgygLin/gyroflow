@@ -460,6 +460,8 @@ pub fn render<F, F2>(stab: Arc<StabilizationManager>, progress: F, input_file: &
         let output_frame = output_frame.unwrap();
 
         macro_rules! create_planes_proc {
+            //                 (Luma8, input_frame,   output_frame,    0,         [0],        255.0)
+            //                 (UV8,   input_frame,   output_frame,    1,         [1,2],      255.0)
             ($planes:ident, $(($t:tt, $in_frame:expr, $out_frame:expr, $ind:expr, $yuvi:expr, $max_val:expr), )*) => {
                 $({
                     let in_size = zero_copy::get_plane_size($in_frame, $ind);       // (2704, 2028)
@@ -482,6 +484,7 @@ pub fn render<F, F2>(stab: Arc<StabilizationManager>, progress: F, input_file: &
                     }
 
                     let mut compute_params = ComputeParams::from_manager(&stab);
+                    // log::debug!("compute_params: {:?}", compute_params);
 
                     let is_limited_range = $out_frame.color_range() == ffmpeg_next::util::color::Range::MPEG;
                     compute_params.background = <$t as PixelType>::from_rgb_color(compute_params.background, &$yuvi, is_limited_range);

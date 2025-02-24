@@ -114,7 +114,7 @@ impl GyroSource {
                 return Ok(md.clone());
             }
         }
-
+        // "file:///home/chg/Downloads/GoPro%20Hero%206.MP4"
         let base = filesystem::get_engine_base();
         let mut file = filesystem::open_file(&base, url, false, false)?;
         let filesize = file.size;
@@ -136,6 +136,7 @@ impl GyroSource {
         let mut lens_params = BTreeMap::new();
         let mut additional_data = serde_json::Value::Object(serde_json::Map::new());
 
+        // "GoPro HERO6 Black"
         if input.camera_type() == "BlackBox" {
             if let Some(ref mut samples) = input.samples {
                 let mut usable_logs = Vec::new();
@@ -338,6 +339,8 @@ impl GyroSource {
             }
             o.remove("has_accurate_timestamps");
         }
+
+        log::debug!("has_accurate_timestamps: {}", has_accurate_timestamps);
 
         let fr = input.frame_readout_time().unwrap_or_default();
 
@@ -547,7 +550,7 @@ impl GyroSource {
         let file_metadata = self.file_metadata.read();
         let mut smoothed_quaternions = self.quaternions.clone();
 
-        for (ts, q) in smoothed_quaternions.iter_mut() {
+        for (ts, q) in smoothed_quaternions.iter_mut() {    // 0.0, 0.0, 0.0
             use crate::KeyframeType;
             let timestamp_ms = *ts as f64 / 1000.0;
             let additional_rotation_x = compute_params.keyframes.value_at_gyro_timestamp(&KeyframeType::AdditionalRotationX, timestamp_ms).unwrap_or(compute_params.additional_rotation.0) * DEG2RAD;
@@ -555,13 +558,23 @@ impl GyroSource {
             let additional_rotation_z = compute_params.keyframes.value_at_gyro_timestamp(&KeyframeType::AdditionalRotationZ, timestamp_ms).unwrap_or(compute_params.additional_rotation.2) * DEG2RAD;
             let additional_rotation   = Quat64::from_euler_angles(additional_rotation_y, additional_rotation_x, additional_rotation_z);
 
+            if additional_rotation_x!=0.0 || additional_rotation_y!=0.0 || additional_rotation_z!=0.0 {
+                log::info!("Additional rotation: {:.3} {:.3} {:.3}", additional_rotation_x, additional_rotation_y, additional_rotation_z);
+            }
+
             *q *= additional_rotation;
         }
 
         if true {
             // Lock horizon, then smooth
-            horizon_lock.lock(&mut smoothed_quaternions, &self.quaternions, &file_metadata.gravity_vectors, self.use_gravity_vectors, self.integration_method, compute_params);
+            // log::info!("Lock horizon:{}, then smooth: {}", horizon_lock.lock_enabled, alg.get_name());
+
+            // log::info!("pre quaternions: len = {}, duration_ms:{}ms pre 10: {:?}", smoothed_quaternions.len(), self.duration_ms, smoothed_quaternions.iter().take(10).collect::<Vec<_>>());
+            // log::info!("compute_params fovs: {:?}", compute_params.fovs);
+            // log::info!("compute_params minimal_fovs: {:?}", compute_params.minimal_fovs);
+            // horizon_lock.lock(&mut smoothed_quaternions, &self.quaternions, &file_metadata.gravity_vectors, self.use_gravity_vectors, self.integration_method, compute_params);
             smoothed_quaternions = alg.smooth(&smoothed_quaternions, self.duration_ms, compute_params);
+            // log::info!("post quaternions: len = {},  post 10: {:?}", smoothed_quaternions.len(), smoothed_quaternions.iter().take(10).collect::<Vec<_>>());
         } else {
             // Smooth, then lock horizon
             smoothed_quaternions = alg.smooth(&smoothed_quaternions, self.duration_ms, compute_params);
@@ -574,6 +587,8 @@ impl GyroSource {
             // rotation quaternion from smooth motion -> raw motion to counteract it
             *sq.1 = sq.1.inverse() * q.1;
         }
+
+        // log::info!("finish quaternions: len = {},  finish 10: {:?}", smoothed_quaternions.len(), smoothed_quaternions.iter().take(10).collect::<Vec<_>>());
         (smoothed_quaternions, max_angles)
     }
 
@@ -653,11 +668,13 @@ impl GyroSource {
             for i in 0..len {
                 for j in 0..len {
                     if i != j {
+                        // 选取两点拟合直线
                         let i_offset = self.offsets.get(&keys[i]).unwrap();
                         let j_offset = self.offsets.get(&keys[j]).unwrap();
                         let slope = (j_offset - i_offset) / (keys[j] - keys[i]) as f64;
                         let intersect = i_offset - keys[i] as f64 * slope;
 
+                        // 计算所有点与拟合直线的误差，并保留误差小于5ms的点
                         let within_error: BTreeMap<i64, f64> = self.offsets.iter().filter_map(|(k, v)| {
                             if ((*k as f64 * slope + intersect) - *v).abs() < max_fitting_error {
                                 Some((*k, *v))
@@ -666,10 +683,11 @@ impl GyroSource {
                             }
                         }).collect();
 
+                        // 如果保留的点数大于等于之前最好的点数，并且新的点数组与之前的不一样，则更新最好的拟合
                         if within_error.len() >= best.offsets.len() && within_error != best.offsets {
                             if let Some(solution) = Self::line_fit(&within_error) {
                                 let close_constant = solution[0].abs() < 0.1;
-                                if within_error.len() > 2 && close_constant {
+                                    if within_error.len() > 2 && close_constant {
                                     if solution[2] < best.rsquared {
                                         best = Params {
                                             rsquared: solution[2],
@@ -690,6 +708,7 @@ impl GyroSource {
                 }
             }
 
+            // 使用上一步得到的拟合直线，计算所有点的offset，用于显示。
             self.offsets_linear.clear();
             if !best.offsets.is_empty() {
                 for (k, _) in &self.offsets {

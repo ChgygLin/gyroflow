@@ -196,15 +196,18 @@ impl StabilizationManager {
             (params.fps, params.size)
         };
 
+        log::info!("fps: {}, size: {:?}", fps, size);
+
         let cancel_flag2 = cancel_flag.clone();
         let mut md = GyroSource::parse_telemetry_file(url, options, size, fps, progress_cb, cancel_flag2)?;
         if md.detected_source.as_ref().map(|v| v.starts_with("GoPro ")).unwrap_or_default() {
             // If gopro reports rolling shutter value, it already applied it, ie. the video is already corrected
             md.frame_readout_time = None;
+            println!("md.frame_readout_time: {:?}", md.frame_readout_time);
         }
 
         if is_main_video {
-            if let Some(ref lens) = md.lens_profile {
+            if let Some(ref lens) = md.lens_profile {   // None
                 let mut l = self.lens.write();
                 if let Some(lens_str) = lens.as_str() {
                     let mut db = self.lens_profile_db.read();
@@ -226,13 +229,13 @@ impl StabilizationManager {
                     l.resolve_interpolations(&db);
                 }
             }
-            if let Some(md_fps) = md.frame_rate {
+            if let Some(md_fps) = md.frame_rate {   // None
                 let fps = self.params.read().fps;
                 if (md_fps - fps).abs() > 1.0 {
                     self.override_video_fps(md_fps, false);
                 }
             }
-            self.params.write().frame_readout_direction = md.frame_readout_direction;
+            self.params.write().frame_readout_direction = md.frame_readout_direction;   // TopToBottom
             if md.detected_source.as_ref().map(|v| v.starts_with("Blackmagic ")).unwrap_or_default() {
                 if let Some(rot) = md.additional_data.get("rotation").and_then(|x| x.as_u64()) {
                     if rot == 90 || rot == 270 {
@@ -424,7 +427,7 @@ impl StabilizationManager {
         zooming::calculate_fovs(compute_params, &timestamps, method.into())
     }
     pub fn recompute_adaptive_zoom(&self) {
-        let mut params = stabilization::ComputeParams::from_manager(self);
+        let mut params: ComputeParams = stabilization::ComputeParams::from_manager(self);
         params.calculate_camera_fovs();
 
         let lens_fov_adjustment = params.lens.optimal_fov.unwrap_or(1.0);
@@ -508,7 +511,7 @@ impl StabilizationManager {
         params.calculate_camera_fovs();
 
         let smoothing = self.smoothing.read();
-        let horizon_lock = smoothing.horizon_lock.clone();
+        let horizon_lock = smoothing.horizon_lock.clone();  // false
 
         let (quats, max_angles) = self.gyro.read().recompute_smoothness(smoothing.current().as_ref(), horizon_lock, &params);
         let mut gyro = self.gyro.write();

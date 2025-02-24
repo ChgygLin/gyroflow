@@ -772,11 +772,11 @@ impl Controller {
                 core::run_threaded(move || {
                     let mut additional_data = serde_json::Value::Object(serde_json::Map::new());
                     let additional_obj = additional_data.as_object_mut().unwrap();
-                    if is_main_video {
+                    if is_main_video {  // true
                         // Ignore the error here, video file may not contain the telemetry and it's ok
                         let _ = stab.load_gyro_data(&url, is_main_video, &Default::default(), progress, cancel_flag);
 
-                        stab.recompute_undistortion();
+                        stab.recompute_undistortion();  // wrong function name?  the real is "set_compute_params"
                     } else {
                         let mut options = gyroflow_core::gyro_source::FileLoadOptions::default();
                         if sample_index > -1 {
@@ -787,21 +787,21 @@ impl Controller {
                             err(("An error occured: %1".to_string(), e.to_string()));
                         }
                     }
-                    stab.recompute_smoothness();
+                    // stab.recompute_smoothness();
 
                     let gyro = stab.gyro.read();
                     let file_metadata = gyro.file_metadata.read();
                     let detected = file_metadata.detected_source.as_ref().map(String::clone).unwrap_or_default();
-                    let has_raw_gyro = !file_metadata.raw_imu.is_empty();
-                    let has_quats = !file_metadata.quaternions.is_empty();
-                    let has_motion = has_raw_gyro || has_quats;
+                    let has_raw_gyro = !file_metadata.raw_imu.is_empty();   // true
+                    let has_quats = !file_metadata.quaternions.is_empty();  // false
+                    let has_motion = has_raw_gyro || has_quats;             // true
                     additional_obj.insert("imu_orientation".to_owned(),   serde_json::Value::String(gyro.imu_transforms.imu_orientation.clone().unwrap_or_else(|| "XYZ".into())));
                     additional_obj.insert("contains_raw_gyro".to_owned(), serde_json::Value::Bool(has_raw_gyro));
                     additional_obj.insert("contains_quats".to_owned(),    serde_json::Value::Bool(has_quats));
                     additional_obj.insert("contains_motion".to_owned(),   serde_json::Value::Bool(has_motion));
                     additional_obj.insert("has_accurate_timestamps".to_owned(), serde_json::Value::Bool(file_metadata.has_accurate_timestamps));
                     additional_obj.insert("sample_rate".to_owned(),       serde_json::to_value(gyroflow_core::gyro_source::GyroSource::get_sample_rate(&*file_metadata)).unwrap());
-                    let has_builtin_profile = file_metadata.lens_profile.as_ref().map(|y| y.is_object()).unwrap_or_default();
+                    let has_builtin_profile = file_metadata.lens_profile.as_ref().map(|y| y.is_object()).unwrap_or_default();   // false
                     let md_data = file_metadata.additional_data.clone();
                     if let Some(md_fps) = file_metadata.frame_rate {
                         let fps = stab.params.read().fps;
@@ -843,6 +843,7 @@ impl Controller {
                 });
             }
         }
+
     }
     fn load_lens_profile(&mut self, url_or_id: QString) {
         let (json, filepath, checksum) = {

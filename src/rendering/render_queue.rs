@@ -1106,6 +1106,7 @@ impl RenderQueue {
     }
 
     pub fn add_file(&mut self, url: String, gyro_url: String, additional_data: String) -> u32 {
+        println!("add_file: {}, gyro_url: {}, additional_data: {}", url, gyro_url, additional_data);
         let job_id = fastrand::u32(1..);
 
         let is_gf_data = url.starts_with('{');

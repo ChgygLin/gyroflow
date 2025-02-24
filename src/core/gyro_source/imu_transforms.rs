@@ -17,7 +17,7 @@ pub struct IMUTransforms {
 }
 impl IMUTransforms {
     pub fn transform(&self, v: &mut [f64; 3], is_acc: bool) {
-        if let Some(bias) = self.gyro_bias {
+        if let Some(bias) = self.gyro_bias {    // None
             v[0] += bias[0];
             v[1] += bias[1];
             v[2] += bias[2];
